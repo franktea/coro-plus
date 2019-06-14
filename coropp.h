@@ -61,6 +61,12 @@ stack_allocator alloc;
 
 fcontext_t main_; // jump to main
 
+void Yield()
+{
+    transfer_t t = jump_fcontext(main_, 0);
+    main_ = t.fctx;
+}
+
 enum CoroStatus
 {
     CS_CREATED,
@@ -80,14 +86,7 @@ public:
     void Run()
     {
         status_ = CS_RUNNING;
-        DoRun();
-    }
-
-    virtual void DoRun()
-    {
-        std::cout<<"please override this\n";
-        Yield();
-        std::cout<<"111111111\n";
+        func_();
     }
 public:
     void Resume()
@@ -96,17 +95,12 @@ public:
         t_ = t.fctx;
     }
 
-    void Yield()
-    {
-        transfer_t t = jump_fcontext(main_, 0);
-        main_ = t.fctx;
-    }
-
     virtual ~Coro() {}
 public:
     void* sp_;
     fcontext_t t_;
     CoroStatus status_;
+    std::function<void()> func_;
 };
 
 class CoroContext
@@ -125,12 +119,15 @@ void Entry(transfer_t t)
     jump_fcontext(main_, 0);
 }
 
-
-void Create(Coro* coro) {
-    fcontext_t ctx = make_fcontext( coro->sp_, stack_allocator::default_stacksize(), Entry);
+template<class Func>
+Coro* Create(Func&& func) {
+    Coro* coro = new Coro;
+    coro->func_ = std::move(func);
+    fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
     transfer_t t = jump_fcontext( ctx, coro);
     coro->t_ = t.fctx;
     std::cout<<"lalalalalal\n";
+    return coro;
 }
 
 /*

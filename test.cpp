@@ -10,28 +10,24 @@
 
 using namespace CoroPP;
 
-class Coro1 : public Coro
-{
-public:
-    virtual void DoRun() override
-    {
-        std::cout<<"my own coro\n";
-        Yield();
-        std::cout<<"come back\n";
-    }
-};
-
 int main()
 {
-    Coro* coro = new Coro;
-    Coro1* c = new Coro1;
-    Create(coro);
-    Create(c);
-    coro->Resume();
-    c->Resume();
-    std::cout<<"aaaaaa\n";
-    std::cout<<"status:"<<coro->status_<<"\n";
-    std::cout<<"status2:"<<c->status_<<"\n";
+    Coro* c1 = Create([](){
+        std::cout<<"11111111111111111\n";
+        Yield();
+        std::cout<<"111111111========\n";
+    });
+    Coro* c2 = Create([](){
+        std::cout<<"22222222222222222\n";
+        Yield();
+        std::cout<<"2222222222=======\n";
+    });
+
+    c1->Resume();
+    c2->Resume();
+
+    assert(c1->status_ == 2);
+    assert(c2->status_ == 2);
     return 0;
 }
 
