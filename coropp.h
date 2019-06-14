@@ -52,10 +52,40 @@ typedef simple_stack_allocator<64 * 1024> stack_allocator;
 
 stack_allocator alloc;
 
-fcontext_t main_ = nullptr; // main coroutine
-
 class Coro;
-Coro* current_coro_ = nullptr; // current coroutine, not main
+
+class Scheduler
+{
+    friend class Coro;
+    friend void Yield();
+    friend void Entry(transfer_t t);
+public:
+    Scheduler(): main_(nullptr), current_coro_(nullptr) {}
+
+    template<class F>
+    bool Dispatch(F&& f)
+    {
+        return false;
+    }
+
+    int32_t Run();
+
+    template< class Rep, class Period >
+    int32_t RunFor(std::chrono::duration<Rep, Period> duration);
+
+    static Scheduler& Instance()
+    {
+        static Scheduler* p = new Scheduler;
+        return *p;
+    }
+    Scheduler(const Scheduler&) = delete;
+    Scheduler(Scheduler&&) = delete;
+    Scheduler& operator=(const Scheduler&) = delete;
+    Scheduler& operator=(Scheduler&&) = delete;
+private:
+    fcontext_t main_;
+    Coro* current_coro_;
+};
 
 enum CoroStatus
 {
@@ -81,8 +111,8 @@ public:
 public:
     void Resume()
     {
-        assert(current_coro_ == nullptr);
-        current_coro_ = this; // 设置好需要跳转的协程，再跳转
+        assert(Scheduler::Instance().current_coro_ == nullptr);
+        Scheduler::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
         transfer_t t = jump_fcontext(t_, 0); // 跳到协程的函数中去
 
         // 从协程里面返回到main了
@@ -99,12 +129,12 @@ public:
 
 void Yield()
 {
-    assert(current_coro_ != nullptr);
-    current_coro_ = nullptr; // 先设置成null再跳出
-    transfer_t t = jump_fcontext(main_, 0); //  跳到main里面去
+    assert(Scheduler::Instance().current_coro_ != nullptr);
+    Scheduler::Instance().current_coro_ = nullptr; // 先设置成null再跳出
+    transfer_t t = jump_fcontext(Scheduler::Instance().main_, 0); //  跳到main里面去
 
     // 从main里面返回到当前协程里面了
-    main_ = t.fctx;
+    Scheduler::Instance().main_ = t.fctx;
 }
 
 class CoroContext
@@ -114,16 +144,16 @@ private:
 };
 
 
-void Entry(transfer_t t)
+inline void Entry(transfer_t t)
 {
     Coro* coro = (Coro*)t.data;
-    main_ = t.fctx;
-    current_coro_ = coro;
+    Scheduler::Instance().main_ = t.fctx;
+    Scheduler::Instance().current_coro_ = coro;
     coro->Run();
     coro->status_ = CS_FINISHED;
-    current_coro_ = nullptr;
+    Scheduler::Instance().current_coro_ = nullptr;
     std::cout<<"heiheiheihei\n";
-    jump_fcontext(main_, 0);
+    jump_fcontext(Scheduler::Instance().main_, 0);
 }
 
 template<class Func>
@@ -139,15 +169,5 @@ Coro* Create(Func&& func) {
     return coro;
 }
 
-/*
-class Scheduler
-{
-public:
-    template<class F>
-    bool Dispatch(F&& f);
-    int32_t Run();
-    int32_t RunFor(std::chrono::duration duration);
-};
-*/
 } //namespace CoroPP
 #endif /* COROPP_H_ */
