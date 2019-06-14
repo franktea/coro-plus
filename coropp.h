@@ -26,18 +26,12 @@ using boost::context::detail::ontop_fcontext;
 class Coro;
 class Scheduler;
 
-template< std::size_t Max, std::size_t Default, std::size_t Min >
+template<std::size_t Default>
 class simple_stack_allocator
 {
 public:
-    static std::size_t maximum_stacksize()
-    { return Max; }
-
     static std::size_t default_stacksize()
     { return Default; }
-
-    static std::size_t minimum_stacksize()
-    { return Min; }
 
     void * allocate( std::size_t size) const
     {
@@ -54,16 +48,14 @@ public:
     }
 };
 
-typedef simple_stack_allocator<
-            8 * 1024 * 1024, 64 * 1024, 8 * 1024
-        > stack_allocator;
+typedef simple_stack_allocator<64 * 1024> stack_allocator;
 
 stack_allocator alloc;
 
-fcontext_t main_; // jump to main
+fcontext_t main_ = nullptr; // main coroutine
 
 class Coro;
-Coro* current_coro_ = nullptr;
+Coro* current_coro_ = nullptr; // current coroutine, not main
 
 enum CoroStatus
 {
@@ -111,7 +103,7 @@ void Yield()
     current_coro_ = nullptr; // 先设置成null再跳出
     transfer_t t = jump_fcontext(main_, 0); //  跳到main里面去
 
-    // 从main里面返回了
+    // 从main里面返回到当前协程里面了
     main_ = t.fctx;
 }
 
