@@ -16,6 +16,8 @@ int main()
         std::cout<<"11111111111111111\n";
         Yield();
         std::cout<<"111111111========\n";
+        Yield();
+        std::cout<<"111111111........\n";
     });
     Coro* c2 = Create([](){
         std::cout<<"22222222222222222\n";
@@ -23,6 +25,9 @@ int main()
         std::cout<<"2222222222=======\n";
     });
 
+    std::cout<<"in mian.\n";
+    c1->Resume();
+    std::cout<<"in main 2.\n";
     c1->Resume();
     c2->Resume();
 

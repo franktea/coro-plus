@@ -11,6 +11,7 @@
 #include <chrono>
 #include <stdint.h>
 #include <map>
+#include <assert.h>
 #include <boost/context/detail/fcontext.hpp>
 
 namespace CoroPP
@@ -61,11 +62,8 @@ stack_allocator alloc;
 
 fcontext_t main_; // jump to main
 
-void Yield()
-{
-    transfer_t t = jump_fcontext(main_, 0);
-    main_ = t.fctx;
-}
+class Coro;
+Coro* current_coro_ = nullptr;
 
 enum CoroStatus
 {
@@ -91,7 +89,11 @@ public:
 public:
     void Resume()
     {
-        transfer_t t = jump_fcontext(t_, 0);
+        assert(current_coro_ == nullptr);
+        current_coro_ = this; // 设置好需要跳转的协程，再跳转
+        transfer_t t = jump_fcontext(t_, 0); // 跳到协程的函数中去
+
+        // 从协程里面返回到main了
         t_ = t.fctx;
     }
 
@@ -102,6 +104,16 @@ public:
     CoroStatus status_;
     std::function<void()> func_;
 };
+
+void Yield()
+{
+    assert(current_coro_ != nullptr);
+    current_coro_ = nullptr; // 先设置成null再跳出
+    transfer_t t = jump_fcontext(main_, 0); //  跳到main里面去
+
+    // 从main里面返回了
+    main_ = t.fctx;
+}
 
 class CoroContext
 {
@@ -114,8 +126,11 @@ void Entry(transfer_t t)
 {
     Coro* coro = (Coro*)t.data;
     main_ = t.fctx;
+    current_coro_ = coro;
     coro->Run();
     coro->status_ = CS_FINISHED;
+    current_coro_ = nullptr;
+    std::cout<<"heiheiheihei\n";
     jump_fcontext(main_, 0);
 }
 
@@ -124,7 +139,9 @@ Coro* Create(Func&& func) {
     Coro* coro = new Coro;
     coro->func_ = std::move(func);
     fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
-    transfer_t t = jump_fcontext( ctx, coro);
+    transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
+
+    // 从协程里面返回到main了
     coro->t_ = t.fctx;
     std::cout<<"lalalalalal\n";
     return coro;
