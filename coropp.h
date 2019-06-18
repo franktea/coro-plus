@@ -153,7 +153,7 @@ public:
     void Run()
     {
         status_ = CS_RUNNING;
-        func_();
+        func_(id_);
     }
 public:
     void Resume()
@@ -172,7 +172,7 @@ public:
     fcontext_t t_;
     CoroStatus status_;
     const CoroID id_;
-    std::function<void()> func_;
+    std::function<void(CoroID id)> func_;
 };
 
 void Yield()
@@ -193,7 +193,6 @@ inline void Entry(transfer_t t)
     coro->Run();
     coro->status_ = CS_FINISHED;
     Scheduler::Instance().current_coro_ = nullptr;
-    std::cout<<"heiheiheihei\n";
     jump_fcontext(Scheduler::Instance().main_, 0);
 }
 
@@ -214,7 +213,6 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
 
     // 从协程里面返回到main了
     coro->t_ = t.fctx;
-    std::cout<<"lalalalalal\n";
 
     running_coros_.insert(std::make_pair(id, coro));
     return coro;
@@ -242,6 +240,9 @@ template<class Rep, class Period>
 inline int32_t CoroPP::Scheduler::RunFor(
         std::chrono::duration<Rep, Period> duration)
 {
+    //this function should run in main
+    assert(current_coro_ == 0);
+
     std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
     auto passed = now.time_since_epoch();
     long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(passed).count();

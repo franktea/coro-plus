@@ -14,14 +14,14 @@ using namespace CoroPP;
 
 int main()
 {
-    Coro* c1 = Scheduler::Instance().Spawn([](){
+    Coro* c1 = Scheduler::Instance().Spawn([](CoroID){
         std::cout<<"11111111111111111\n";
         Yield();
         std::cout<<"111111111========\n";
         Yield();
         std::cout<<"111111111........\n";
     }, 1000);
-    Coro* c2 = Scheduler::Instance().Spawn([](){
+    Coro* c2 = Scheduler::Instance().Spawn([](CoroID){
         std::cout<<"22222222222222222\n";
         Yield();
         std::cout<<"2222222222=======\n";
