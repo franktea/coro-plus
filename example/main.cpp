@@ -113,6 +113,15 @@ int main()
         Package response;
         server_2_client.Recv(response);
         std::cout<<"get response: "<<response.body<<"\n";
+
+        for(int i = 0; i < 10; ++i)
+        {
+            request.body = response.body;
+            client_2_server.Send(request);
+            Yield();
+            server_2_client.Recv(response);
+            std::cout<<"get response "<<i+2<<": "<<response.body<<"\n";
+        }
     });
 
     while(1)
