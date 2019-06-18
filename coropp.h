@@ -13,6 +13,9 @@
 #include <map>
 #include <vector>
 #include <ctime>
+#include <boost/bimap.hpp>
+#include <boost/bimap/set_of.hpp>
+#include <boost/bimap/multiset_of.hpp>
 #include <assert.h>
 #include <boost/context/detail/fcontext.hpp>
 
@@ -90,7 +93,8 @@ public:
     template<class Func>
     Coro* Spawn(Func&& f);
 
-    int32_t Run();
+    template<class Func>
+    Coro* Spawn(Func&& f, long long ms); // add a timer, timeout after ms million seconds
 
     template< class Rep, class Period >
     int32_t RunFor(std::chrono::duration<Rep, Period> duration);
@@ -104,6 +108,11 @@ public:
     Scheduler(Scheduler&&) = delete;
     Scheduler& operator=(const Scheduler&) = delete;
     Scheduler& operator=(Scheduler&&) = delete;
+
+    size_t TimerCount()
+    {
+        return timers_.size();
+    }
 private:
     CoroID NextID()
     {
@@ -121,6 +130,8 @@ private:
     const size_t max_coros_ = 100; // 最多允许同时开启的协程个数
     std::map<CoroID, Coro*> running_coros_;
     std::vector<Coro*> free_list_;
+    using TimerManager = boost::bimap<boost::bimaps::multiset_of<long long>, boost::bimaps::set_of<CoroID>>;
+    TimerManager timers_;
 };
 
 enum CoroStatus
@@ -189,25 +200,68 @@ inline void Entry(transfer_t t)
 template<class Func>
 inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
 {
+    if(running_coros_.size() + free_list_.size() > max_coros_)
     {
-        if(running_coros_.size() + free_list_.size() > max_coros_)
-        {
-            //TODO: 协程个数达到上限
-            return nullptr;
-        }
-
-        CoroID id = Scheduler::Instance().NextID();
-        Coro* coro = new Coro(id);
-        coro->func_ = std::move(f);
-        fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
-        transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
-
-        // 从协程里面返回到main了
-        coro->t_ = t.fctx;
-        std::cout<<"lalalalalal\n";
-
-        return coro;
+        //TODO: 协程个数达到上限
+        return nullptr;
     }
+
+    CoroID id = Scheduler::Instance().NextID();
+    Coro* coro = new Coro(id);
+    coro->func_ = std::move(f);
+    fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
+    transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
+
+    // 从协程里面返回到main了
+    coro->t_ = t.fctx;
+    std::cout<<"lalalalalal\n";
+
+    running_coros_.insert(std::make_pair(id, coro));
+    return coro;
+}
+
+template<class Func>
+inline Coro* CoroPP::Scheduler::Spawn(Func&& f, long long ms)
+{
+    Coro* coro = Spawn(std::move(f));
+    if(!coro)
+    {
+        std::cerr<<"null coro\n";
+        return nullptr;
+    }
+
+    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    long long millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    millis += ms;
+    timers_.insert(TimerManager::value_type(millis, coro->id_));
+    return coro;
+}
+
+template<class Rep, class Period>
+inline int32_t CoroPP::Scheduler::RunFor(
+        std::chrono::duration<Rep, Period> duration)
+{
+    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+    auto passed = now.time_since_epoch();
+    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(passed).count();
+    while(!timers_.empty() && timers_.left.begin()->first <= ms)
+    {
+        auto it = timers_.left.begin();
+        timers_.left.erase(it);
+        auto coro_it = running_coros_.find(it->second);
+        if(coro_it == running_coros_.end())
+        {
+            std::cout<<"cannot find coro on timeout\n";
+        }
+        else
+        {
+            Coro* coro = coro_it->second;
+            coro->Resume();
+        }
+    }
+
+    return 0;
 }
 
 } //namespace CoroPP
