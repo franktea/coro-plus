@@ -11,6 +11,8 @@
 #include <chrono>
 #include <stdint.h>
 #include <map>
+#include <vector>
+#include <ctime>
 #include <assert.h>
 #include <boost/context/detail/fcontext.hpp>
 
@@ -25,6 +27,17 @@ using boost::context::detail::ontop_fcontext;
 
 class Coro;
 class Scheduler;
+
+using CoroID = struct {
+    time_t time_stamp;
+    uint32_t index;
+};
+
+inline bool operator<(const CoroID& lhs, const CoroID& rhs)
+{
+    return lhs.time_stamp < rhs.time_stamp ||
+            (lhs.time_stamp == rhs.time_stamp && lhs.index < rhs.index);
+}
 
 template<std::size_t Default>
 class simple_stack_allocator
@@ -60,13 +73,22 @@ class Scheduler
     friend void Yield();
     friend void Entry(transfer_t t);
 public:
-    Scheduler(): main_(nullptr), current_coro_(nullptr) {}
+    Scheduler(): main_(nullptr), current_coro_(nullptr), id_(0) {}
 
-    template<class F>
-    bool Dispatch(F&& f)
+    // find coro by id, return null if not found.
+    Coro* FindCoro(const CoroID id)
     {
-        return false;
+        auto it = running_coros_.find(id);
+        if(it == running_coros_.end())
+        {
+            return nullptr;
+        }
+
+        return it->second;
     }
+
+    template<class Func>
+    Coro* Spawn(Func&& f);
 
     int32_t Run();
 
@@ -83,8 +105,22 @@ public:
     Scheduler& operator=(const Scheduler&) = delete;
     Scheduler& operator=(Scheduler&&) = delete;
 private:
+    CoroID NextID()
+    {
+       if(++id_ == 0)
+       {
+           ++id_;
+       }
+       return CoroID { std::time(nullptr), id_ };
+    }
+private:
     fcontext_t main_;
     Coro* current_coro_;
+private:
+    uint32_t id_;
+    const size_t max_coros_ = 100; // 最多允许同时开启的协程个数
+    std::map<CoroID, Coro*> running_coros_;
+    std::vector<Coro*> free_list_;
 };
 
 enum CoroStatus
@@ -98,7 +134,7 @@ class Coro
 {
     friend class Scheduler;
 public:
-    Coro() : t_(nullptr), status_(CS_CREATED)
+    Coro(const CoroID id) : t_(nullptr), status_(CS_CREATED), id_(id)
     {
         sp_ = alloc.allocate(stack_allocator::default_stacksize());
     }
@@ -124,6 +160,7 @@ public:
     void* sp_;
     fcontext_t t_;
     CoroStatus status_;
+    const CoroID id_;
     std::function<void()> func_;
 };
 
@@ -136,13 +173,6 @@ void Yield()
     // 从main里面返回到当前协程里面了
     Scheduler::Instance().main_ = t.fctx;
 }
-
-class CoroContext
-{
-private:
-    fcontext_t f_;
-};
-
 
 inline void Entry(transfer_t t)
 {
@@ -157,17 +187,29 @@ inline void Entry(transfer_t t)
 }
 
 template<class Func>
-Coro* Create(Func&& func) {
-    Coro* coro = new Coro;
-    coro->func_ = std::move(func);
-    fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
-    transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
+inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
+{
+    {
+        if(running_coros_.size() + free_list_.size() > max_coros_)
+        {
+            //TODO: 协程个数达到上限
+            return nullptr;
+        }
 
-    // 从协程里面返回到main了
-    coro->t_ = t.fctx;
-    std::cout<<"lalalalalal\n";
-    return coro;
+        CoroID id = Scheduler::Instance().NextID();
+        Coro* coro = new Coro(id);
+        coro->func_ = std::move(f);
+        fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
+        transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
+
+        // 从协程里面返回到main了
+        coro->t_ = t.fctx;
+        std::cout<<"lalalalalal\n";
+
+        return coro;
+    }
 }
 
 } //namespace CoroPP
+
 #endif /* COROPP_H_ */

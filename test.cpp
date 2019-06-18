@@ -12,14 +12,14 @@ using namespace CoroPP;
 
 int main()
 {
-    Coro* c1 = Create([](){
+    Coro* c1 = Scheduler::Instance().Spawn([](){
         std::cout<<"11111111111111111\n";
         Yield();
         std::cout<<"111111111========\n";
         Yield();
         std::cout<<"111111111........\n";
     });
-    Coro* c2 = Create([](){
+    Coro* c2 = Scheduler::Instance().Spawn([](){
         std::cout<<"22222222222222222\n";
         Yield();
         std::cout<<"2222222222=======\n";
