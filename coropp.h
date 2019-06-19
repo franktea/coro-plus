@@ -11,6 +11,7 @@
 #include <chrono>
 #include <stdint.h>
 #include <map>
+#include <any>
 #include <vector>
 #include <ctime>
 #include <boost/bimap.hpp>
@@ -74,10 +75,14 @@ class Scheduler
 {
     friend class Coro;
     friend void Yield();
-    friend void Entry(transfer_t t);
-public:
-    Scheduler(): main_(nullptr), current_coro_(nullptr), id_(0) {}
 
+    template<class Rep, class Period>
+    friend bool Yield(std::chrono::duration<Rep, Period> timeout);
+
+    friend void Entry(transfer_t t);
+
+    struct TimeOut {}; // 一个空的类型，用来标识超时
+public:
     // find coro by id, return null if not found.
     Coro* FindCoro(const CoroID id)
     {
@@ -93,8 +98,8 @@ public:
     template<class Func>
     Coro* Spawn(Func&& f);
 
-    template<class Func>
-    Coro* Spawn(Func&& f, long long ms); // add a timer, timeout after ms million seconds
+//    template<class Func>
+//    Coro* Spawn(Func&& f, long long ms); // add a timer, timeout after ms million seconds
 
     template< class Rep, class Period >
     int32_t RunFor(std::chrono::duration<Rep, Period> duration);
@@ -113,7 +118,14 @@ public:
     {
         return timers_.size();
     }
+
+    Coro* CurrentCoro()
+    {
+        return current_coro_;
+    }
 private:
+    Scheduler(): main_(nullptr), current_coro_(nullptr), id_(0) {}
+
     CoroID NextID()
     {
        if(++id_ == 0)
@@ -155,23 +167,56 @@ public:
         status_ = CS_RUNNING;
         func_(id_);
     }
+
+    bool TimeOut()
+    {
+        try {
+            std::any_cast<Scheduler::TimeOut>(param_);
+            param_.reset();
+            return true;
+        } catch (const std::bad_any_cast& e) {}
+        return false;
+    }
 public:
-    void Resume()
+    void Resume() // 正常的Resume，如果有定时器需要在此函数中删除定时器
     {
         assert(Scheduler::Instance().current_coro_ == nullptr);
         Scheduler::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
-        transfer_t t = jump_fcontext(t_, 0); // 跳到协程的函数中去
+
+        if(param_.has_value()) // 判断是否有定时器，有就删除
+        {
+            try {
+                CoroID id = std::any_cast<CoroID>(param_);
+                param_.reset();
+                //删除定时器
+                auto deleted = Scheduler::Instance().timers_.right.erase(id);
+                assert(deleted == 1); // 应该是删除有且仅有一个定时器
+            } catch(const std::bad_any_cast&) {}
+        }
+
+        transfer_t t = jump_fcontext(t_, &param_); // 跳到协程的函数中去
 
         // 从协程里面返回到main了
         t_ = t.fctx;
     }
 
     virtual ~Coro() {}
+private:
+    void Resume(Scheduler::TimeOut) // 超时的时候调用Resume，由scheduler在处理定时器的时候调用
+    {
+        assert(Scheduler::Instance().current_coro_ == nullptr);
+        Scheduler::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
+        transfer_t t = jump_fcontext(t_, &param_); // 跳到协程的函数中去
+
+        // 从协程里面返回到main了
+        t_ = t.fctx;
+    }
 public:
     void* sp_;
     fcontext_t t_;
     CoroStatus status_;
     const CoroID id_;
+    std::any param_; // 用于在协程间传参，记录超时或者传参信息。用any来保存实际类型，是为了避免用void*
     std::function<void(CoroID id)> func_;
 };
 
@@ -183,6 +228,33 @@ void Yield()
 
     // 从main里面返回到当前协程里面了
     Scheduler::Instance().main_ = t.fctx;
+}
+
+// yield的同时设置超时时间，在timeout内如果没有Resume则定时器会触发，当前异步调用超时
+// 返回值：如果超时，则返回true
+template<class Rep, class Period>
+bool Yield(std::chrono::duration<Rep, Period> timeout)
+{
+    assert(Scheduler::Instance().current_coro_ != nullptr);
+
+    // 先添加定时器
+    Coro* coro = Scheduler::Instance().current_coro_;
+    using namespace std::chrono;
+    time_point<system_clock> now = system_clock::now();
+    long long millis = duration_cast<milliseconds>(now.time_since_epoch()).count() +
+            duration_cast<milliseconds>(timeout).count();
+    auto[it, inserted] = Scheduler::Instance().timers_.insert(Scheduler::TimerManager::value_type(millis, coro->id_));
+    assert(inserted);
+    coro->param_ = coro->id_; // 当前协程带了定时器，用coro id标记，正常Resume的时候根据此值删除定时器
+
+    // 再调用Yield
+    Scheduler::Instance().current_coro_ = nullptr; // 先设置成null再跳出
+    transfer_t t = jump_fcontext(Scheduler::Instance().main_, 0); //  跳到main里面去
+
+    // 从main里面返回到当前协程里面了
+    Scheduler::Instance().main_ = t.fctx;
+    assert(coro == Scheduler::Instance().current_coro_);
+    return coro->TimeOut();
 }
 
 inline void Entry(transfer_t t)
@@ -218,23 +290,23 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
     return coro;
 }
 
-template<class Func>
-inline Coro* CoroPP::Scheduler::Spawn(Func&& f, long long ms)
-{
-    Coro* coro = Spawn(std::move(f));
-    if(!coro)
-    {
-        std::cerr<<"null coro\n";
-        return nullptr;
-    }
-
-    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    long long millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    millis += ms;
-    timers_.insert(TimerManager::value_type(millis, coro->id_));
-    return coro;
-}
+//template<class Func>
+//inline Coro* CoroPP::Scheduler::Spawn(Func&& f, long long ms)
+//{
+//    Coro* coro = Spawn(std::move(f));
+//    if(!coro)
+//    {
+//        std::cerr<<"null coro\n";
+//        return nullptr;
+//    }
+//
+//    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+//    auto duration = now.time_since_epoch();
+//    long long millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+//    millis += ms;
+//    timers_.insert(TimerManager::value_type(millis, coro->id_));
+//    return coro;
+//}
 
 template<class Rep, class Period>
 inline int32_t CoroPP::Scheduler::RunFor(
@@ -258,7 +330,8 @@ inline int32_t CoroPP::Scheduler::RunFor(
         else
         {
             Coro* coro = coro_it->second;
-            coro->Resume();
+            coro->param_ = TimeOut{};
+            coro->Resume(TimeOut{});
         }
     }
 

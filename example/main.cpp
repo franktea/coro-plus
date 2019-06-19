@@ -101,8 +101,9 @@ void check_response(Scheduler& sch)
 
 int main()
 {
-    Scheduler sch;
+    Scheduler& sch = Scheduler::Instance();
 
+    /*
     sch.Spawn([](CoroID id){
         Package request;
         request.header.id = id;
@@ -123,6 +124,26 @@ int main()
             std::cout<<"get response "<<i+2<<": "<<response.body<<"\n";
         }
     });
+*/
+
+    for(int i = 0; i < 10; ++i)
+    {
+        sch.Spawn([i](CoroID id){
+            Package request = {{id, 1}, std::string("world ") + std::to_string(i)};
+            client_2_server.Send(request);
+            using namespace std::chrono_literals;
+            if(Yield(100ms))
+            { // 超时了
+                std::cout<<"coro "<<i<<" timeout.\n";
+                return;
+            }
+
+            // 协程正常返回
+            Package response;
+            server_2_client.Recv(response);
+            std::cout<<"coro "<<i<<" get response: "<<response.body<<"\n";
+        });
+    }
 
     while(1)
     {
