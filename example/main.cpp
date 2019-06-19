@@ -56,12 +56,21 @@ public:
         id = packages_.begin()->header.id;
         return true;
     }
+
+    bool Empty()
+    {
+        return packages_.empty();
+    }
 private:
     std::list<Package> packages_;
 };
 
+//用两个队列通信
 Queue client_2_server;
 Queue server_2_client;
+
+// 缓存一些回包，故意等到超时了再发送
+Queue delayed_response;
 
 void fake_server()
 {
@@ -72,8 +81,25 @@ void fake_server()
         std::random_device rd;
         std::mt19937 mt(rd());
         std::uniform_real_distribution<double> dist(0.0, 10.0);
-        if(dist(mt) < 5.0) // 将有些请求丢掉不回包，这些请求就会超时
+        const double r = dist(mt);
+        if(r < 3.0) // 将有些请求丢掉不回包，这些请求就会超时
         {
+            continue;
+        }
+        else if(r < 6.0) // 将这些请求的结果存起来，等到客户端超时了再发，模拟超时以后回包才到达的情况
+        {
+            Package response;
+            switch(request.header.cmd)
+            {
+            case 1:
+                response.header = request.header;
+                response.body = std::string("too late: ") + request.body;
+                delayed_response.Send(response);
+                break;
+            default:
+                std::cerr<<"undefined cmd="<<request.header.cmd<<"\n";
+            }
+
             continue;
         }
 
@@ -98,9 +124,12 @@ void check_response(Scheduler& sch)
     while(server_2_client.Peak(id))
     {
         Coro* coro = sch.FindCoro(id);
-        if(!coro)
+        if(!coro) // 应该是被之前的定时器把对应的coro删掉了
         {
-            std::cerr<<"can not find coro!\n";
+            // 这个包没用了，把包收出来，免得阻塞后面的
+            Package pkg;
+            server_2_client.Recv(pkg);
+            std::cout<<pkg.body<<"\n";
         }
         else
         {
@@ -136,12 +165,13 @@ int main()
     });
 */
 
+    using namespace std::chrono_literals;
+
     for(int i = 0; i < 10; ++i)
     {
         sch.Spawn([i](CoroID id){
             Package request = {{id, 1}, std::string("world ") + std::to_string(i)};
             client_2_server.Send(request);
-            using namespace std::chrono_literals;
             if(Yield(100ms))
             { // 超时了
                 std::cout<<"coro "<<i<<" timeout.\n";
@@ -154,6 +184,17 @@ int main()
             std::cout<<"coro "<<i<<" get response: "<<response.body<<"\n";
         });
     }
+
+    // 等待客户端都超时以后，将部分回包发过去，模拟定时器触发以后回包再到达的情况
+    sch.Spawn([](CoroID id){
+        Yield(1000ms); // 等待1s足够前面所有的定时器都超时了，因为前面的定时器都只等100ms
+        while(!delayed_response.Empty())
+        {
+            Package pkg;
+            delayed_response.Recv(pkg);
+            server_2_client.Send(pkg);
+        }
+    });
 
     while(1)
     {

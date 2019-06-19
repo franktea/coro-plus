@@ -132,13 +132,13 @@ private:
        return CoroID { std::time(nullptr), id_ };
     }
 
-    void Recyle(Coro* coro); // 回收协程资源
+    inline void Recyle(Coro* coro); // 回收协程资源
 private:
     fcontext_t main_;
     Coro* current_coro_;
 private:
     uint32_t id_;
-    const size_t max_coros_ = 100; // 最多允许同时开启的协程个数
+    const size_t max_coros_ = 1000; // 最多允许同时开启的协程个数
     std::map<CoroID, Coro*> running_coros_;
     std::vector<Coro*> free_list_;
     using TimerManager = boost::bimap<boost::bimaps::multiset_of<long long>, boost::bimaps::set_of<CoroID>>;
@@ -272,10 +272,10 @@ inline void Entry(transfer_t t)
 template<class Func>
 inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
 {
-    if(running_coros_.size() + free_list_.size() > max_coros_)
+    if(free_list_.empty() && (running_coros_.size() >= max_coros_))
     {
-        //TODO: 协程个数达到上限
-        std::cout<<"too many coros created\n";
+        // 协程个数达到上限
+        std::cerr<<"too many coros created\n";
         return nullptr;
     }
 
@@ -308,7 +308,7 @@ void CoroPP::Scheduler::Recyle(Coro* coro) // 回收协程资源
 {
     running_coros_.erase(coro->id_);
     free_list_.push_back(coro);
-    std::cout<<"recyled coro id="<<"\n";
+    //std::cout<<"recyled coro id="<<"\n";
 }
 
 template<class Rep, class Period>
@@ -328,7 +328,7 @@ inline int32_t CoroPP::Scheduler::RunFor(
         auto coro_it = running_coros_.find(it->second);
         if(coro_it == running_coros_.end())
         {
-            std::cout<<"cannot find coro on timeout\n";
+            std::cerr<<"cannot find coro on timeout\n";
         }
         else
         {

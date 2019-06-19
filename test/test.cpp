@@ -5,6 +5,10 @@
  *      Author: frank
  */
 
+#define CATCH_CONFIG_MAIN
 
+#include "catch.hpp"
 
+TEST_CASE( "normal without timeout", "[normal]" ) {
 
+}
