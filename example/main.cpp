@@ -118,7 +118,7 @@ void fake_server()
     }
 }
 
-void check_response(Scheduler& sch)
+void check_response(CoroPool& sch)
 {
     CoroID id;
     while(server_2_client.Peak(id))
@@ -140,36 +140,13 @@ void check_response(Scheduler& sch)
 
 int main()
 {
-    Scheduler& sch = Scheduler::Instance();
-
-    /*
-    sch.Spawn([](CoroID id){
-        Package request;
-        request.header.id = id;
-        request.header.cmd = 1;
-        request.body = "world";
-        client_2_server.Send(request);
-        Yield();
-        Package response;
-        server_2_client.Recv(response);
-        std::cout<<"get response: "<<response.body<<"\n";
-
-        for(int i = 0; i < 10; ++i)
-        {
-            request.body = response.body;
-            client_2_server.Send(request);
-            Yield();
-            server_2_client.Recv(response);
-            std::cout<<"get response "<<i+2<<": "<<response.body<<"\n";
-        }
-    });
-*/
+    CoroPool& pool = CoroPool::Instance();
 
     using namespace std::chrono_literals;
 
     for(int i = 0; i < 10; ++i)
     {
-        sch.Spawn([i](CoroID id){
+        pool.Spawn([i](CoroID id){
             Package request = {{id, 1}, std::string("world ") + std::to_string(i)};
             client_2_server.Send(request);
             if(Yield(100ms))
@@ -186,7 +163,7 @@ int main()
     }
 
     // 等待客户端都超时以后，将部分回包发过去，模拟定时器触发以后回包再到达的情况
-    sch.Spawn([](CoroID id){
+    pool.Spawn([](CoroID id){
         Yield(1000ms); // 等待1s足够前面所有的定时器都超时了，因为前面的定时器都只等100ms
         while(!delayed_response.Empty())
         {
@@ -196,11 +173,20 @@ int main()
         }
     });
 
+    // 测试coro重用的情况，前面的协程都结束了，内存被回收，下面这些应该是重用的
+    for(int i = 0; i < 10; ++i)
+    {
+        pool.Spawn([i](CoroID){
+            Yield(3000ms);
+            std::cout<<"reused coro "<<i<<"\n";
+        });
+    }
+
     while(1)
     {
-        sch.RunFor(std::chrono::milliseconds(5));
+        pool.ProcessTimers(std::chrono::milliseconds(5));
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        check_response(sch);
+        check_response(pool);
         fake_server();
     }
 }

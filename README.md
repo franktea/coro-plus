@@ -1,2 +1,2 @@
 # coro-plus
-coroutine library with scheduler
+coroutine library with timeout

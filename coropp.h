@@ -27,10 +27,9 @@ using boost::context::detail::fcontext_t;
 using boost::context::detail::transfer_t;
 using boost::context::detail::jump_fcontext;
 using boost::context::detail::make_fcontext;
-using boost::context::detail::ontop_fcontext;
 
 class Coro;
-class Scheduler;
+class CoroPool;
 
 using CoroID = struct {
     time_t time_stamp;
@@ -71,7 +70,7 @@ stack_allocator alloc;
 
 class Coro;
 
-class Scheduler
+class CoroPool
 {
     friend class Coro;
     friend void Yield();
@@ -99,17 +98,17 @@ public:
     Coro* Spawn(Func&& f);
 
     template< class Rep, class Period >
-    int32_t RunFor(std::chrono::duration<Rep, Period> duration);
+    int32_t ProcessTimers(std::chrono::duration<Rep, Period> duration);
 
-    static Scheduler& Instance()
+    static CoroPool& Instance()
     {
-        static Scheduler* p = new Scheduler;
+        static CoroPool* p = new CoroPool;
         return *p;
     }
-    Scheduler(const Scheduler&) = delete;
-    Scheduler(Scheduler&&) = delete;
-    Scheduler& operator=(const Scheduler&) = delete;
-    Scheduler& operator=(Scheduler&&) = delete;
+    CoroPool(const CoroPool&) = delete;
+    CoroPool(CoroPool&&) = delete;
+    CoroPool& operator=(const CoroPool&) = delete;
+    CoroPool& operator=(CoroPool&&) = delete;
 
     size_t TimerCount()
     {
@@ -121,7 +120,7 @@ public:
         return current_coro_;
     }
 private:
-    Scheduler(): main_(nullptr), current_coro_(nullptr), id_(0) {}
+    CoroPool(): main_(nullptr), current_coro_(nullptr), id_(0) {}
 
     CoroID NextID()
     {
@@ -154,7 +153,7 @@ enum CoroStatus
 
 class Coro
 {
-    friend class Scheduler;
+    friend class CoroPool;
 public:
     Coro() : t_(nullptr), status_(CS_CREATED), id_({0, 0})
     {
@@ -170,7 +169,7 @@ public:
     bool TimeOut()
     {
         try {
-            std::any_cast<Scheduler::TimeOut>(param_);
+            std::any_cast<CoroPool::TimeOut>(param_);
             param_.reset();
             return true;
         } catch (const std::bad_any_cast& e) {}
@@ -179,8 +178,8 @@ public:
 public:
     void Resume() // 正常的Resume，如果有定时器需要在此函数中删除定时器
     {
-        assert(Scheduler::Instance().current_coro_ == nullptr);
-        Scheduler::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
+        assert(CoroPool::Instance().current_coro_ == nullptr);
+        CoroPool::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
 
         if(param_.has_value()) // 判断是否有定时器，有就删除
         {
@@ -188,7 +187,7 @@ public:
                 CoroID id = std::any_cast<CoroID>(param_);
                 param_.reset();
                 //删除定时器
-                auto deleted = Scheduler::Instance().timers_.right.erase(id);
+                auto deleted = CoroPool::Instance().timers_.right.erase(id);
                 assert(deleted == 1); // 应该是删除有且仅有一个定时器
             } catch(const std::bad_any_cast&) {}
         }
@@ -201,10 +200,10 @@ public:
 
     virtual ~Coro() {}
 private:
-    void Resume(Scheduler::TimeOut) // 超时的时候调用Resume，由scheduler在处理定时器的时候调用
+    void Resume(CoroPool::TimeOut) // 超时的时候调用Resume，由scheduler在处理定时器的时候调用
     {
-        assert(Scheduler::Instance().current_coro_ == nullptr);
-        Scheduler::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
+        assert(CoroPool::Instance().current_coro_ == nullptr);
+        CoroPool::Instance().current_coro_ = this; // 设置好需要跳转的协程，再跳转
         transfer_t t = jump_fcontext(t_, &param_); // 跳到协程的函数中去
 
         // 从协程里面返回到main了
@@ -221,12 +220,12 @@ public:
 
 void Yield()
 {
-    assert(Scheduler::Instance().current_coro_ != nullptr);
-    Scheduler::Instance().current_coro_ = nullptr; // 先设置成null再跳出
-    transfer_t t = jump_fcontext(Scheduler::Instance().main_, 0); //  跳到main里面去
+    assert(CoroPool::Instance().current_coro_ != nullptr);
+    CoroPool::Instance().current_coro_ = nullptr; // 先设置成null再跳出
+    transfer_t t = jump_fcontext(CoroPool::Instance().main_, 0); //  跳到main里面去
 
     // 从main里面返回到当前协程里面了
-    Scheduler::Instance().main_ = t.fctx;
+    CoroPool::Instance().main_ = t.fctx;
 }
 
 // yield的同时设置超时时间，在timeout内如果没有Resume则定时器会触发，当前异步调用超时
@@ -234,43 +233,43 @@ void Yield()
 template<class Rep, class Period>
 bool Yield(std::chrono::duration<Rep, Period> timeout)
 {
-    assert(Scheduler::Instance().current_coro_ != nullptr);
+    assert(CoroPool::Instance().current_coro_ != nullptr);
 
     // 先添加定时器
-    Coro* coro = Scheduler::Instance().current_coro_;
+    Coro* coro = CoroPool::Instance().current_coro_;
     using namespace std::chrono;
     time_point<system_clock> now = system_clock::now();
     long long millis = duration_cast<milliseconds>(now.time_since_epoch()).count() +
             duration_cast<milliseconds>(timeout).count();
-    auto[it, inserted] = Scheduler::Instance().timers_.insert(Scheduler::TimerManager::value_type(millis, coro->id_));
+    auto[it, inserted] = CoroPool::Instance().timers_.insert(CoroPool::TimerManager::value_type(millis, coro->id_));
     assert(inserted);
     coro->param_ = coro->id_; // 当前协程带了定时器，用coro id标记，正常Resume的时候根据此值删除定时器
 
     // 再调用Yield
-    Scheduler::Instance().current_coro_ = nullptr; // 先设置成null再跳出
-    transfer_t t = jump_fcontext(Scheduler::Instance().main_, 0); //  跳到main里面去
+    CoroPool::Instance().current_coro_ = nullptr; // 先设置成null再跳出
+    transfer_t t = jump_fcontext(CoroPool::Instance().main_, 0); //  跳到main里面去
 
     // 从main里面返回到当前协程里面了
-    Scheduler::Instance().main_ = t.fctx;
-    assert(coro == Scheduler::Instance().current_coro_);
+    CoroPool::Instance().main_ = t.fctx;
+    assert(coro == CoroPool::Instance().current_coro_);
     return coro->TimeOut();
 }
 
 inline void Entry(transfer_t t)
 {
     Coro* coro = (Coro*)t.data;
-    Scheduler::Instance().main_ = t.fctx;
-    Scheduler::Instance().current_coro_ = coro;
+    CoroPool::Instance().main_ = t.fctx;
+    CoroPool::Instance().current_coro_ = coro;
     coro->Run();
     coro->status_ = CS_FINISHED;
     //协程结束了，回收该资源
-    Scheduler::Instance().Recyle(Scheduler::Instance().current_coro_);
-    Scheduler::Instance().current_coro_ = nullptr;
-    jump_fcontext(Scheduler::Instance().main_, 0);
+    CoroPool::Instance().Recyle(CoroPool::Instance().current_coro_);
+    CoroPool::Instance().current_coro_ = nullptr;
+    jump_fcontext(CoroPool::Instance().main_, 0);
 }
 
 template<class Func>
-inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
+inline Coro* CoroPP::CoroPool::Spawn(Func&& f)
 {
     if(free_list_.empty() && (running_coros_.size() >= max_coros_))
     {
@@ -285,13 +284,14 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
     {
         coro = *free_list_.end();
         free_list_.pop_back();
+        std::cout<<"free list not empty, reuse\n";
     }
     else
     {
         coro = new Coro();
     }
 
-    CoroID id = Scheduler::Instance().NextID();
+    CoroID id = CoroPool::Instance().NextID();
     coro->id_ = id;
     coro->func_ = std::move(f);
     fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
@@ -304,7 +304,7 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
     return coro;
 }
 
-void CoroPP::Scheduler::Recyle(Coro* coro) // 回收协程资源
+void CoroPP::CoroPool::Recyle(Coro* coro) // 回收协程资源
 {
     running_coros_.erase(coro->id_);
     free_list_.push_back(coro);
@@ -312,7 +312,7 @@ void CoroPP::Scheduler::Recyle(Coro* coro) // 回收协程资源
 }
 
 template<class Rep, class Period>
-inline int32_t CoroPP::Scheduler::RunFor(
+inline int32_t CoroPP::CoroPool::ProcessTimers(
         std::chrono::duration<Rep, Period> duration)
 {
     //this function should run in main
