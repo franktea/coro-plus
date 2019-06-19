@@ -132,11 +132,7 @@ private:
        return CoroID { std::time(nullptr), id_ };
     }
 
-    void Recyle(Coro* coro) // 回收协程资源
-    {
-        free_list_.push_back(coro);
-        std::cout<<"recyled coro id="<<"\n";
-    }
+    void Recyle(Coro* coro); // 回收协程资源
 private:
     fcontext_t main_;
     Coro* current_coro_;
@@ -306,6 +302,13 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
 
     running_coros_.insert(std::make_pair(id, coro));
     return coro;
+}
+
+void CoroPP::Scheduler::Recyle(Coro* coro) // 回收协程资源
+{
+    running_coros_.erase(coro->id_);
+    free_list_.push_back(coro);
+    std::cout<<"recyled coro id="<<"\n";
 }
 
 template<class Rep, class Period>
