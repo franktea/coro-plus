@@ -98,9 +98,6 @@ public:
     template<class Func>
     Coro* Spawn(Func&& f);
 
-//    template<class Func>
-//    Coro* Spawn(Func&& f, long long ms); // add a timer, timeout after ms million seconds
-
     template< class Rep, class Period >
     int32_t RunFor(std::chrono::duration<Rep, Period> duration);
 
@@ -134,6 +131,12 @@ private:
        }
        return CoroID { std::time(nullptr), id_ };
     }
+
+    void Recyle(Coro* coro) // 回收协程资源
+    {
+        free_list_.push_back(coro);
+        std::cout<<"recyled coro id="<<"\n";
+    }
 private:
     fcontext_t main_;
     Coro* current_coro_;
@@ -157,7 +160,7 @@ class Coro
 {
     friend class Scheduler;
 public:
-    Coro(const CoroID id) : t_(nullptr), status_(CS_CREATED), id_(id)
+    Coro() : t_(nullptr), status_(CS_CREATED), id_({0, 0})
     {
         sp_ = alloc.allocate(stack_allocator::default_stacksize());
     }
@@ -215,7 +218,7 @@ public:
     void* sp_;
     fcontext_t t_;
     CoroStatus status_;
-    const CoroID id_;
+    CoroID id_;
     std::any param_; // 用于在协程间传参，记录超时或者传参信息。用any来保存实际类型，是为了避免用void*
     std::function<void(CoroID id)> func_;
 };
@@ -264,6 +267,8 @@ inline void Entry(transfer_t t)
     Scheduler::Instance().current_coro_ = coro;
     coro->Run();
     coro->status_ = CS_FINISHED;
+    //协程结束了，回收该资源
+    Scheduler::Instance().Recyle(Scheduler::Instance().current_coro_);
     Scheduler::Instance().current_coro_ = nullptr;
     jump_fcontext(Scheduler::Instance().main_, 0);
 }
@@ -274,11 +279,24 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
     if(running_coros_.size() + free_list_.size() > max_coros_)
     {
         //TODO: 协程个数达到上限
+        std::cout<<"too many coros created\n";
         return nullptr;
     }
 
+    Coro* coro = nullptr;
+
+    if(!free_list_.empty())
+    {
+        coro = *free_list_.end();
+        free_list_.pop_back();
+    }
+    else
+    {
+        coro = new Coro();
+    }
+
     CoroID id = Scheduler::Instance().NextID();
-    Coro* coro = new Coro(id);
+    coro->id_ = id;
     coro->func_ = std::move(f);
     fcontext_t ctx = make_fcontext(coro->sp_, stack_allocator::default_stacksize(), Entry);
     transfer_t t = jump_fcontext( ctx, coro); // 跳到协程的入口函数：Entry
@@ -289,24 +307,6 @@ inline Coro* CoroPP::Scheduler::Spawn(Func&& f)
     running_coros_.insert(std::make_pair(id, coro));
     return coro;
 }
-
-//template<class Func>
-//inline Coro* CoroPP::Scheduler::Spawn(Func&& f, long long ms)
-//{
-//    Coro* coro = Spawn(std::move(f));
-//    if(!coro)
-//    {
-//        std::cerr<<"null coro\n";
-//        return nullptr;
-//    }
-//
-//    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-//    auto duration = now.time_since_epoch();
-//    long long millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-//    millis += ms;
-//    timers_.insert(TimerManager::value_type(millis, coro->id_));
-//    return coro;
-//}
 
 template<class Rep, class Period>
 inline int32_t CoroPP::Scheduler::RunFor(

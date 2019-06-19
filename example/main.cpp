@@ -9,6 +9,7 @@
 #include <chrono>
 #include <list>
 #include <thread>
+#include <random>
 #include <string>
 #include "coropp.h"
 
@@ -67,6 +68,15 @@ void fake_server()
     Package request;
     while(client_2_server.Recv(request))
     {
+        // 随机丢弃，模拟超时
+        std::random_device rd;
+        std::mt19937 mt(rd());
+        std::uniform_real_distribution<double> dist(0.0, 10.0);
+        if(dist(mt) < 5.0) // 将有些请求丢掉不回包，这些请求就会超时
+        {
+            continue;
+        }
+
         Package response;
         switch(request.header.cmd)
         {
