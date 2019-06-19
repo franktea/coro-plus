@@ -19,6 +19,9 @@
 #include <boost/bimap/multiset_of.hpp>
 #include <assert.h>
 #include <boost/context/detail/fcontext.hpp>
+#if defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
+#include <sys/mman.h>
+#endif
 
 namespace CoroPP
 {
@@ -149,6 +152,7 @@ enum CoroStatus
     CS_CREATED,
     CS_RUNNING,
     CS_FINISHED,
+    CS_RECYCLED
 };
 
 class Coro
@@ -158,6 +162,9 @@ public:
     Coro() : t_(nullptr), status_(CS_CREATED), id_({0, 0})
     {
         sp_ = alloc.allocate(stack_allocator::default_stacksize());
+#if defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
+//TODO: mprotect
+#endif
     }
 
     void Run()
@@ -208,6 +215,15 @@ private:
 
         // 从协程里面返回到main了
         t_ = t.fctx;
+    }
+
+    void Clear() // 内存回收的时候把除了sp以外的变量都清空
+    {
+        t_ = nullptr;
+        status_ = CS_RECYCLED;
+        id_ = {0, 0};
+        param_.reset();
+        func_ = nullptr;
     }
 public:
     void* sp_;
@@ -271,6 +287,13 @@ inline void Entry(transfer_t t)
 template<class Func>
 inline Coro* CoroPP::CoroPool::Spawn(Func&& f)
 {
+    // 这个函数只能在main里面调用，协程里面不允许嵌套协程
+    if(current_coro_)
+    {
+        std::cerr<<"spawn must be called in main\n";
+        return nullptr;
+    }
+
     if(free_list_.empty() && (running_coros_.size() >= max_coros_))
     {
         // 协程个数达到上限
@@ -282,7 +305,7 @@ inline Coro* CoroPP::CoroPool::Spawn(Func&& f)
 
     if(!free_list_.empty())
     {
-        coro = *free_list_.end();
+        coro = free_list_.back();
         free_list_.pop_back();
         std::cout<<"free list not empty, reuse\n";
     }
@@ -306,9 +329,10 @@ inline Coro* CoroPP::CoroPool::Spawn(Func&& f)
 
 void CoroPP::CoroPool::Recyle(Coro* coro) // 回收协程资源
 {
+    assert(coro->status_ == CS_FINISHED);
     running_coros_.erase(coro->id_);
+    coro->Clear();
     free_list_.push_back(coro);
-    //std::cout<<"recyled coro id="<<"\n";
 }
 
 template<class Rep, class Period>
@@ -320,7 +344,7 @@ inline int32_t CoroPP::CoroPool::ProcessTimers(
 
     std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
     auto passed = now.time_since_epoch();
-    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(passed).count();
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(passed).count();
     while(!timers_.empty() && timers_.left.begin()->first <= ms)
     {
         auto it = timers_.left.begin();

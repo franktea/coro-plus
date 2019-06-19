@@ -72,7 +72,7 @@ Queue server_2_client;
 // 缓存一些回包，故意等到超时了再发送
 Queue delayed_response;
 
-void fake_server()
+void FakeServer()
 {
     Package request;
     while(client_2_server.Recv(request))
@@ -118,7 +118,7 @@ void fake_server()
     }
 }
 
-void check_response(CoroPool& sch)
+void CheckResponse(CoroPool& sch)
 {
     CoroID id;
     while(server_2_client.Peak(id))
@@ -173,6 +173,14 @@ int main()
         }
     });
 
+    for(int i = 0; i < 1000; ++i)
+    {
+        pool.ProcessTimers(std::chrono::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CheckResponse(pool);
+        FakeServer();
+    }
+
     // 测试coro重用的情况，前面的协程都结束了，内存被回收，下面这些应该是重用的
     for(int i = 0; i < 10; ++i)
     {
@@ -182,12 +190,10 @@ int main()
         });
     }
 
-    while(1)
+    for(int i = 0; i < 1000; ++i)
     {
         pool.ProcessTimers(std::chrono::milliseconds(5));
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        check_response(pool);
-        fake_server();
     }
 }
 
