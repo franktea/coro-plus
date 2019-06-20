@@ -60,12 +60,14 @@ int main()
 {
     CoroPool& pool = CoroPool::Instance();
     CompletionQueue cq;
-    std::shared_ptr<::grpc::Channel> hello_channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
-    std::shared_ptr<Greeter::Stub> hello_stub(Greeter::NewStub(hello_channel));
+    std::shared_ptr<::grpc::Channel> channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
+    std::shared_ptr<Greeter::Stub> hello_stub(Greeter::NewStub(channel));
+    std::shared_ptr<Calculator::Stub> calc_stub(Calculator::NewStub(channel));
 
     for(int i = 0; i < 100; ++i)
     {
-        pool.Spawn([&cq, hello_stub, hello_channel, i](CoroID id){
+
+        pool.Spawn([&cq, hello_stub, channel, i](CoroID id){
             // 构造hello请求
             HelloRequest request;
             std::string name = std::string("name") + std::to_string(i);
@@ -93,6 +95,43 @@ int main()
             }
 
             std::cout<<"get reply:"<<response.ShortDebugString()<<"\n";
+        });
+
+        pool.Spawn([&cq, calc_stub, channel, i](CoroID id){
+            AddRequest request;
+            request.set_a(i);
+            request.set_b(i);
+            //通过grpc发送
+            // Context for the client. It could be used to convey extra information to
+            // the server and/or tweak certain RPC behaviors.
+            ClientContext context;
+            // Storage for the status of the RPC upon completion.
+            Status status;
+            std::unique_ptr<ClientAsyncResponseReader<AddResponse>> response_reader =
+                    calc_stub->PrepareAsyncAdd(&context, request, &cq);
+            // StartCall initiates the RPC call
+            response_reader->StartCall();
+            AddResponse response;
+            //tag参数不好传，因为考虑到协程resume可能是由定时器触发的，参数中的CoroID id可能已经释放，不能传其地址。
+            //此处是new一个CoroID，可以保证该对象始终有效，但是需要手动delete，目前没有想到更好的方法来作为tag传递
+            CoroID* tag = new CoroID(id);
+            response_reader->Finish(&response, &status, (void*)tag);
+            if(Yield(100ms))
+            {
+                delete tag;
+                std::cout<<"time out\n";
+                return;
+            }
+
+            //AddResponse的定义为：
+            //message AddResponse
+            //{
+            //   int32 sum = 1;
+            //}
+            //在protobuf3中，如果一个int的值为0，则打包的时候会忽略掉（因为解包对于不存在的int值依然会解出0）。
+            //所以，如果response的sum为0，则response.ShortDebugString()结果为空字符串。
+            //按照本例的逻辑，当i=0时sum也会为0，会出现空字符串的情况。
+            std::cout<<"get add reply:"<<response.ShortDebugString()<<"\n";
         });
     }
 
