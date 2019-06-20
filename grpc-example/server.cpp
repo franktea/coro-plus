@@ -64,8 +64,8 @@ void RunServer()
     std::string server_address("0.0.0.0:50051");
     GreeterService service;
     CalulatorService cs;
-
     ServerBuilder builder;
+
     // Listen on the given address without any authentication mechanism.
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     // Register "service" as the instance through which we'll communicate with

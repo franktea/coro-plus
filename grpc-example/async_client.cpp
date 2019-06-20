@@ -94,7 +94,14 @@ int main()
                 return;
             }
 
-            std::cout<<"get reply:"<<response.ShortDebugString()<<"\n";
+            if(!status.ok())
+            {
+                std::cout<<"error "<<status.error_code()<<":"<<status.error_message()<<"\n";
+            }
+            else
+            {
+                std::cout<<"get reply:"<<response.ShortDebugString()<<"\n";
+            }
         });
 
         pool.Spawn([&cq, calc_stub, channel, i](CoroID id){
