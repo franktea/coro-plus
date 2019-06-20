@@ -87,7 +87,7 @@ int main()
             //此处是new一个CoroID，可以保证该对象始终有效，但是需要手动delete，目前没有想到更好的方法来作为tag传递
             CoroID* tag = new CoroID(id);
             response_reader->Finish(&response, &status, (void*)tag);
-            if(Yield(100ms))
+            if(Yield(5000ms))
             {
                 delete tag;
                 std::cout<<"time out\n";
@@ -123,7 +123,7 @@ int main()
             //此处是new一个CoroID，可以保证该对象始终有效，但是需要手动delete，目前没有想到更好的方法来作为tag传递
             CoroID* tag = new CoroID(id);
             response_reader->Finish(&response, &status, (void*)tag);
-            if(Yield(100ms))
+            if(Yield(5000ms))
             {
                 delete tag;
                 std::cout<<"time out\n";
