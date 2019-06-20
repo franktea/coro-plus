@@ -25,57 +25,67 @@ using helloworld::Calculator;
 using helloworld::AddRequest;
 using helloworld::AddResponse;
 
-class GreeterService final : public Greeter::Service {
+class GreeterService final : public Greeter::Service
+{
 public:
-	virtual ::grpc::Status SayHello(::grpc::ServerContext* context, const ::helloworld::HelloRequest* request, ::helloworld::HelloReply* response) override
-	{
-	    std::cout<<"hello thread:"<<std::this_thread::get_id()<<"\n";
-		response->set_message(std::string("hello ") + request->name());
-		return Status::OK;
-	}
+    virtual ::grpc::Status SayHello(::grpc::ServerContext* context,
+            const ::helloworld::HelloRequest* request,
+            ::helloworld::HelloReply* response) override
+    {
+        std::cout << "hello thread:" << std::this_thread::get_id() << "\n";
+        response->set_message(std::string("hello ") + request->name());
+        return Status::OK;
+    }
 
-	virtual ::grpc::Status PingPong(::grpc::ServerContext* context, const ::helloworld::PingpongRequest* request, ::helloworld::PingpongResponse* response) override
-	{
-		response->set_pong(request->ping() + std::string("pong"));
-		return Status::OK;
-	}
+    virtual ::grpc::Status PingPong(::grpc::ServerContext* context,
+            const ::helloworld::PingpongRequest* request,
+            ::helloworld::PingpongResponse* response) override
+    {
+        response->set_pong(request->ping() + std::string("pong"));
+        return Status::OK;
+    }
 };
 
-class CalulatorService final : public Calculator::Service {
+class CalulatorService final : public Calculator::Service
+{
 public:
-	virtual ::grpc::Status Add(::grpc::ServerContext* context, const ::helloworld::AddRequest* request, ::helloworld::AddResponse* response) override
-	{
-	    std::cout<<"add   thread:"<<std::this_thread::get_id()<<"\n";
-		response->set_sum(request->a() + request->b());
-		return Status::OK;
-	}
+    virtual ::grpc::Status Add(::grpc::ServerContext* context,
+            const ::helloworld::AddRequest* request,
+            ::helloworld::AddResponse* response) override
+    {
+        std::cout << "add   thread:" << std::this_thread::get_id() << "\n";
+        response->set_sum(request->a() + request->b());
+        return Status::OK;
+    }
 };
 
-void RunServer() {
-	std::string server_address("0.0.0.0:50051");
-	GreeterService service;
-	CalulatorService cs;
+void RunServer()
+{
+    std::string server_address("0.0.0.0:50051");
+    GreeterService service;
+    CalulatorService cs;
 
-	ServerBuilder builder;
-	// Listen on the given address without any authentication mechanism.
-	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-	// Register "service" as the instance through which we'll communicate with
-	// clients. In this case it corresponds to an *synchronous* service.
-	builder.RegisterService(&service);
-	builder.RegisterService(&cs);
+    ServerBuilder builder;
+    // Listen on the given address without any authentication mechanism.
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    // Register "service" as the instance through which we'll communicate with
+    // clients. In this case it corresponds to an *synchronous* service.
+    builder.RegisterService(&service);
+    builder.RegisterService(&cs);
 
-	// Finally assemble the server.
-	std::unique_ptr<Server> server(builder.BuildAndStart());
-	std::cout << "Server listening on " << server_address << std::endl;
+    // Finally assemble the server.
+    std::unique_ptr<Server> server(builder.BuildAndStart());
+    std::cout << "Server listening on " << server_address << std::endl;
 
-	// Wait for the server to shutdown. Note that some other thread must be
-	// responsible for shutting down the server for this call to ever return.
-	server->Wait();
+    // Wait for the server to shutdown. Note that some other thread must be
+    // responsible for shutting down the server for this call to ever return.
+    server->Wait();
 }
 
-int main(int argc, char** argv) {
-    std::cout<<"main  thread:"<<std::this_thread::get_id()<<"\n";
-	RunServer();
-	return 0;
+int main(int argc, char** argv)
+{
+    std::cout << "main  thread:" << std::this_thread::get_id() << "\n";
+    RunServer();
+    return 0;
 }
 
