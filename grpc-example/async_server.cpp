@@ -162,11 +162,11 @@ private:
     void HandleRpcs()
     {
         // Spawn a new CallData instance to serve new clients.
-        for(int i = 0; i < 500; ++i)
-        {
+        //for(int i = 0; i < 500; ++i)
+        //{
         (new HelloCallData(&service_, cq_.get()))->Proceed();
         (new AddCallData(&calc_service_, cq_.get()))->Proceed();
-        }
+        //}
         void* tag;  // uniquely identifies a request.
         bool ok;
         while (true)

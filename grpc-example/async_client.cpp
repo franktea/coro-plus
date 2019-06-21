@@ -64,7 +64,7 @@ int main()
     std::shared_ptr<Greeter::Stub> hello_stub(Greeter::NewStub(channel));
     std::shared_ptr<Calculator::Stub> calc_stub(Calculator::NewStub(channel));
 
-    for(int i = 0; i < 100; ++i)
+    for(int i = 0; i < 200; ++i)
     {
 
         pool.Spawn([&cq, hello_stub, channel, i](CoroID id){
@@ -87,7 +87,7 @@ int main()
             //此处是new一个CoroID，可以保证该对象始终有效，但是需要手动delete，目前没有想到更好的方法来作为tag传递
             CoroID* tag = new CoroID(id);
             response_reader->Finish(&response, &status, (void*)tag);
-            if(Yield(5000ms))
+            if(Yield(100ms))
             {
                 delete tag;
                 std::cout<<"time out\n";
@@ -123,9 +123,9 @@ int main()
             //此处是new一个CoroID，可以保证该对象始终有效，但是需要手动delete，目前没有想到更好的方法来作为tag传递
             CoroID* tag = new CoroID(id);
             response_reader->Finish(&response, &status, (void*)tag);
-            if(Yield(5000ms))
+            if(Yield(100ms))
             {
-                delete tag;
+                //delete tag;
                 std::cout<<"time out\n";
                 return;
             }
