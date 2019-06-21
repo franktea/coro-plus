@@ -19,13 +19,13 @@ int main()
     asio::io_context io(1);
     asio::ip::tcp::endpoint ep(asio::ip::address::from_string("127.0.0.1"), 12345);
 
-    for(int i = 0; i < 100; ++i)
+    for(int i = 0; i < 1; ++i)
     {
         pool.Spawn([i, ep, &io](CoroID id){
             asio::ip::tcp::socket socket(io);
             socket.async_connect(ep, [i, id](const asio::error_code& err){
-                 if(err){
-                     std::cout<<"coro "<<i<<" connect err:"<<err.message();
+                 if(err) {
+                     std::cout<<"coro "<<i<<" connect err:"<<err.message()<<"\n";
                      return;
                  }
                  Coro* coro = CoroPool::Instance().FindCoro(id);
@@ -40,15 +40,13 @@ int main()
             Yield();
             std::string str = std::string("hello") + std::to_string(i);
             asio::async_write(socket, asio::buffer(str), [id](const asio::error_code& err, size_t len){
-                if(err)
-                {
+                if(err) {
                     std::cout<<"get err:"<<err.message()<<"\n";
                     return;
                 }
 
                 Coro* coro = CoroPool::Instance().FindCoro(id);
-                if(!coro)
-                {
+                if(!coro) {
                     std::cout<<"coro not found\n";
                     return;
                 }
