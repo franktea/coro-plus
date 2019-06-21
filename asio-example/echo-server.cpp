@@ -7,27 +7,30 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <memory>
 #include "asio.hpp"
 #include "coropp.h"
 
 using namespace CoroPP;
 using namespace std::chrono_literals;
 
-void Echo(asio::ip::tcp::socket socket)
+void Echo(asio::ip::tcp::socket socket_)
 {
-    CoroPool::Instance().Spawn([&socket](CoroID id) {
+    auto socket = std::make_shared<asio::ip::tcp::socket>(std::move(socket_));
+    auto f = [socket](CoroID id) {
         bool stopped = false;
         while(!stopped) {
             char buff[256];
             bzero(buff, sizeof(buff));
             size_t recv_len = 0;
-            socket.async_read_some(asio::buffer(buff), [id, &stopped, &buff, &recv_len](const asio::error_code& err, size_t len) {
+            socket->async_read_some(asio::buffer(buff), [id, &stopped, &buff, &recv_len](const asio::error_code& err, size_t len) {
                 if(err) {
                     std::cout<<"read err: "<<err.message()<<"\n";
                     stopped = true;
+                } else {
+                    recv_len = len;
+                    std::cout<<"recved "<<len<<":"<<std::string(buff, len)<<"\n";
                 }
-                recv_len = len;
-                std::cout<<"recved "<<len<<":"<<std::string(buff, len)<<"\n";
                 Coro* coro = CoroPool::Instance().FindCoro(id);
                 if(!coro) {
                     std::cout<<"coro not found\n";
@@ -37,7 +40,7 @@ void Echo(asio::ip::tcp::socket socket)
                 }
             });
             Yield();
-            asio::async_write(socket, asio::buffer(buff, recv_len), [&stopped, id](const asio::error_code& err, size_t len) {
+            asio::async_write(*socket, asio::buffer(buff, recv_len), [&stopped, id](const asio::error_code& err, size_t len) {
                 if(err) {
                     std::cout<<"send err: "<<err.message()<<"\n";
                     stopped = true;
@@ -52,6 +55,19 @@ void Echo(asio::ip::tcp::socket socket)
             });
             Yield();
         }
+    };
+    CoroPool::Instance().Spawn(f);
+}
+
+void Accept(asio::ip::tcp::acceptor& acceptor)
+{
+    acceptor.async_accept([&acceptor](const asio::error_code& err, asio::ip::tcp::socket socket) {
+        if(err) {
+            std::cout<<"accept err:"<<err.message()<<"\n";
+            return;
+        }
+        Echo(std::move(socket));
+        Accept(acceptor);
     });
 }
 
@@ -61,8 +77,9 @@ int main()
 
     asio::ip::tcp::endpoint ep(asio::ip::address::from_string("127.0.0.1"), 12345);
     asio::ip::tcp::acceptor acceptor(io, ep);
-
-    CoroPool& pool = CoroPool::Instance();
+    Accept(acceptor);
+    //CoroPool& pool = CoroPool::Instance();
+    /*
     pool.Spawn([&acceptor](CoroID id){
         bool stopped = false;
         while(!stopped) {
@@ -71,20 +88,19 @@ int main()
                    stopped = true;
                    std::cout<<"accept err: "<<err.message()<<"\n";
                } else {
-
+                   Echo(std::move(socket));
                }
                Coro* coro = CoroPool::Instance().FindCoro(id);
                if(!coro) {
                    std::cout<<"can not find coro\n";
                    stopped = true;
                } else {
-                   Echo(std::move(socket));
                    coro->Resume();
                }
             });
             Yield();
         }
-    });
+    });*/
 
     while(1)
     {

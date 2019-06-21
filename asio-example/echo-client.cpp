@@ -19,7 +19,7 @@ int main()
     asio::io_context io(1);
     asio::ip::tcp::endpoint ep(asio::ip::address::from_string("127.0.0.1"), 12345);
 
-    for(int i = 0; i < 1; ++i)
+    for(int i = 0; i < 100; ++i)
     {
         pool.Spawn([i, ep, &io](CoroID id){
             asio::ip::tcp::socket socket(io);
