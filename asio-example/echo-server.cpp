@@ -77,10 +77,10 @@ int main()
 
     asio::ip::tcp::endpoint ep(asio::ip::address::from_string("127.0.0.1"), 12345);
     asio::ip::tcp::acceptor acceptor(io, ep);
-    Accept(acceptor);
-    //CoroPool& pool = CoroPool::Instance();
-    /*
-    pool.Spawn([&acceptor](CoroID id){
+    //Accept(acceptor); // accept不适用协程
+
+    // accept适用协程的方式，看起来像是在协程中又启动了新的协程
+    CoroPool::Instance().Spawn([&acceptor](CoroID id){
         bool stopped = false;
         while(!stopped) {
             acceptor.async_accept([&stopped, id](const asio::error_code& err, asio::ip::tcp::socket socket){
@@ -88,7 +88,7 @@ int main()
                    stopped = true;
                    std::cout<<"accept err: "<<err.message()<<"\n";
                } else {
-                   Echo(std::move(socket));
+                   Echo(std::move(socket)); // 对每个socket启动一个协程来进行数据读写
                }
                Coro* coro = CoroPool::Instance().FindCoro(id);
                if(!coro) {
@@ -100,7 +100,7 @@ int main()
             });
             Yield();
         }
-    });*/
+    });
 
     while(1)
     {
